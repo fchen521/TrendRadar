@@ -96,12 +96,10 @@ report:
   max_news_per_keyword: 3
 
 display:
+  # Show only the synthesized brief in reports and push messages.
+  # Hotlist/RSS/standalone inputs remain available to AI analysis but are not rendered as long detail sections.
   region_order:
     - ai_analysis
-    - hotlist
-    - rss
-    - new_items
-    - standalone
   regions:
     hotlist: true
     new_items: false
