@@ -1,448 +1,5 @@
 # coding=utf-8
 """
-AI 分析结果格式化模块
-
-将 AI 分析结果格式化为各推送渠道的样式
-"""
-
-import html as html_lib
-import re
-from .analyzer import AIAnalysisResult
-
-
-def _escape_html(text: str) -> str:
-    """转义 HTML 特殊字符，防止 XSS 攻击"""
-    return html_lib.escape(text) if text else ""
-
-
-def _format_list_content(text: str) -> str:
-    """
-    格式化列表内容，确保序号前有换行
-    例如将 "1. xxx 2. yyy" 转换为:
-    1. xxx
-    2. yyy
-    """
-    if not text:
-        return ""
-
-    # 去除首尾空白，防止 AI 返回的内容开头就有换行导致显示空行
-    text = text.strip()
-
-    # 0. 合并序号与紧随的【标签】（防御性处理）
-    # 将 "1.\n【投资者】：" 或 "1. 【投资者】：" 合并为 "1. 投资者："
-    text = re.sub(r'(\d+\.)\s*【([^】]+)】([:：]?)', r'\1 \2：', text)
-
-    # 1. 规范化：确保 "1." 后面有空格
-    result = re.sub(r'(\d+)\.([^ \d])', r'\1. \2', text)
-
-    # 2. 强制换行：匹配 "数字."，且前面不是换行符
-    result = re.sub(r'(?<=[^\n])\s+(\d+\.)', r'\n\1', result)
-
-    # 3. 处理 "1.**粗体**" 这种情况（虽然 Prompt 要求不输出 Markdown，但防御性处理）
-    result = re.sub(r'(?<=[^\n])(\d+\.\*\*)', r'\n\1', result)
-
-    # 4. 处理中文标点后的换行
-    result = re.sub(r'([：:;,。；，])\s*(\d+\.)', r'\1\n\2', result)
-
-    # 5. 处理 "XX方面："、"XX领域：" 等子标题换行
-    # 只有在中文标点（句号、逗号、分号等）后才触发换行，避免破坏 "1. XX领域：" 格式
-    result = re.sub(r'([。！？；，、])\s*([a-zA-Z0-9\u4e00-\u9fa5]+(方面|领域)[:：])', r'\1\n\2', result)
-
-    # 6. 处理 【标签】 格式
-    # 6a. 标签前确保空行分隔（文本开头除外）
-    result = re.sub(r'(?<=\S)\n*(【[^】]+】)', r'\n\n\1', result)
-    # 6b. 合并标签与被换行拆开的冒号：【tag】\n： → 【tag】：
-    result = re.sub(r'(【[^】]+】)\n+([:：])', r'\1\2', result)
-    # 6c. 标签后（含可选冒号），如果紧跟非空白非冒号内容则另起一行
-    # 用 (?=[^\s:：]) 避免正则回溯将冒号误判为"内容"而拆开 【tag】：
-    result = re.sub(r'(【[^】]+】[:：]?)[ \t]*(?=[^\s:：])', r'\1\n', result)
-
-    # 7. 在列表项之间增加视觉空行
-    # 排除 【标签】 行（以】结尾）和子标题行（以冒号结尾）之后的情况，避免标题与首项之间出现空行
-    result = re.sub(r'(?<![:：】])\n(\d+\.)', r'\n\n\1', result)
-
-    return result
-
-
-def _format_standalone_summaries(summaries: dict) -> str:
-    """格式化独立展示区概括为纯文本行，每个源名称单独一行"""
-    if not summaries:
-        return ""
-    lines = []
-    for source_name, summary in summaries.items():
-        if summary:
-            lines.append(f"[{source_name}]:\n{summary}")
-    return "\n\n".join(lines)
-
-
-def render_ai_analysis_markdown(result: AIAnalysisResult) -> str:
-    """渲染为通用 Markdown 格式（Telegram、企业微信、ntfy、Bark、Slack）"""
-    if not result.success:
-        return f"⚠️ AI 分析失败: {result.error}"
-
-    lines = ["**✨ AI 热点分析**", ""]
-
-    if result.core_trends:
-        lines.extend(["**核心热点态势**", _format_list_content(result.core_trends), ""])
-
-    if result.sentiment_controversy:
-        lines.extend(
-            ["**舆论风向争议**", _format_list_content(result.sentiment_controversy), ""]
-        )
-
-    if result.signals:
-        lines.extend(["**异动与弱信号**", _format_list_content(result.signals), ""])
-
-    if result.rss_insights:
-        lines.extend(
-            ["**RSS 深度洞察**", _format_list_content(result.rss_insights), ""]
-        )
-
-    if result.outlook_strategy:
-        lines.extend(
-            ["**研判策略建议**", _format_list_content(result.outlook_strategy), ""]
-        )
-
-    if result.stock_watchlist:
-        lines.extend(
-            ["**股票候选观察**", _format_list_content(result.stock_watchlist), ""]
-        )
-
-    if result.standalone_summaries:
-        summaries_text = _format_standalone_summaries(result.standalone_summaries)
-        if summaries_text:
-            lines.extend(["**独立源点速览**", summaries_text])
-
-    return "\n".join(lines)
-
-
-def render_ai_analysis_feishu(result: AIAnalysisResult) -> str:
-    """渲染为飞书卡片 Markdown 格式"""
-    if not result.success:
-        return f"⚠️ AI 分析失败: {result.error}"
-
-    lines = ["**✨ AI 热点分析**", ""]
-
-    if result.core_trends:
-        lines.extend(["**核心热点态势**", _format_list_content(result.core_trends), ""])
-
-    if result.sentiment_controversy:
-        lines.extend(
-            ["**舆论风向争议**", _format_list_content(result.sentiment_controversy), ""]
-        )
-
-    if result.signals:
-        lines.extend(["**异动与弱信号**", _format_list_content(result.signals), ""])
-
-    if result.rss_insights:
-        lines.extend(
-            ["**RSS 深度洞察**", _format_list_content(result.rss_insights), ""]
-        )
-
-    if result.outlook_strategy:
-        lines.extend(
-            ["**研判策略建议**", _format_list_content(result.outlook_strategy), ""]
-        )
-
-    if result.stock_watchlist:
-        lines.extend(
-            ["**股票候选观察**", _format_list_content(result.stock_watchlist), ""]
-        )
-
-    if result.standalone_summaries:
-        summaries_text = _format_standalone_summaries(result.standalone_summaries)
-        if summaries_text:
-            lines.extend(["**独立源点速览**", summaries_text])
-
-    return "\n".join(lines)
-
-
-def render_ai_analysis_dingtalk(result: AIAnalysisResult) -> str:
-    """渲染为钉钉 Markdown 格式"""
-    if not result.success:
-        return f"⚠️ AI 分析失败: {result.error}"
-
-    lines = ["### ✨ AI 热点分析", ""]
-
-    if result.core_trends:
-        lines.extend(
-            ["#### 核心热点态势", _format_list_content(result.core_trends), ""]
-        )
-
-    if result.sentiment_controversy:
-        lines.extend(
-            [
-                "#### 舆论风向争议",
-                _format_list_content(result.sentiment_controversy),
-                "",
-            ]
-        )
-
-    if result.signals:
-        lines.extend(["#### 异动与弱信号", _format_list_content(result.signals), ""])
-
-    if result.rss_insights:
-        lines.extend(
-            ["#### RSS 深度洞察", _format_list_content(result.rss_insights), ""]
-        )
-
-    if result.outlook_strategy:
-        lines.extend(
-            ["#### 研判策略建议", _format_list_content(result.outlook_strategy), ""]
-        )
-
-    if result.stock_watchlist:
-        lines.extend(
-            ["#### 股票候选观察", _format_list_content(result.stock_watchlist), ""]
-        )
-
-    if result.standalone_summaries:
-        summaries_text = _format_standalone_summaries(result.standalone_summaries)
-        if summaries_text:
-            lines.extend(["#### 独立源点速览", summaries_text])
-
-    return "\n".join(lines)
-
-
-def render_ai_analysis_html(result: AIAnalysisResult) -> str:
-    """渲染为 HTML 格式（邮件）"""
-    if not result.success:
-        return (
-            f'<div class="ai-error">⚠️ AI 分析失败: {_escape_html(result.error)}</div>'
-        )
-
-    html_parts = ['<div class="ai-analysis">', "<h3>✨ AI 热点分析</h3>"]
-
-    if result.core_trends:
-        content = _format_list_content(result.core_trends)
-        content_html = _escape_html(content).replace("\n", "<br>")
-        html_parts.extend(
-            [
-                '<div class="ai-section">',
-                "<h4>核心热点态势</h4>",
-                f'<div class="ai-content">{content_html}</div>',
-                "</div>",
-            ]
-        )
-
-    if result.sentiment_controversy:
-        content = _format_list_content(result.sentiment_controversy)
-        content_html = _escape_html(content).replace("\n", "<br>")
-        html_parts.extend(
-            [
-                '<div class="ai-section">',
-                "<h4>舆论风向争议</h4>",
-                f'<div class="ai-content">{content_html}</div>',
-                "</div>",
-            ]
-        )
-
-    if result.signals:
-        content = _format_list_content(result.signals)
-        content_html = _escape_html(content).replace("\n", "<br>")
-        html_parts.extend(
-            [
-                '<div class="ai-section">',
-                "<h4>异动与弱信号</h4>",
-                f'<div class="ai-content">{content_html}</div>',
-                "</div>",
-            ]
-        )
-
-    if result.rss_insights:
-        content = _format_list_content(result.rss_insights)
-        content_html = _escape_html(content).replace("\n", "<br>")
-        html_parts.extend(
-            [
-                '<div class="ai-section">',
-                "<h4>RSS 深度洞察</h4>",
-                f'<div class="ai-content">{content_html}</div>',
-                "</div>",
-            ]
-        )
-
-    if result.outlook_strategy:
-        content = _format_list_content(result.outlook_strategy)
-        content_html = _escape_html(content).replace("\n", "<br>")
-        html_parts.extend(
-            [
-                '<div class="ai-section ai-conclusion">',
-                "<h4>研判策略建议</h4>",
-                f'<div class="ai-content">{content_html}</div>',
-                "</div>",
-            ]
-        )
-
-    if result.stock_watchlist:
-        content = _format_list_content(result.stock_watchlist)
-        content_html = _escape_html(content).replace("\n", "<br>")
-        html_parts.extend(
-            [
-                '<div class="ai-section ai-stock-watchlist">',
-                "<h4>股票候选观察</h4>",
-                f'<div class="ai-content">{content_html}</div>',
-                "</div>",
-            ]
-        )
-
-    if result.standalone_summaries:
-        summaries_text = _format_standalone_summaries(result.standalone_summaries)
-        if summaries_text:
-            summaries_html = _escape_html(summaries_text).replace("\n", "<br>")
-            html_parts.extend(
-                [
-                    '<div class="ai-section">',
-                    "<h4>独立源点速览</h4>",
-                    f'<div class="ai-content">{summaries_html}</div>',
-                    "</div>",
-                ]
-            )
-
-    html_parts.append("</div>")
-    return "\n".join(html_parts)
-
-
-def render_ai_analysis_plain(result: AIAnalysisResult) -> str:
-    """渲染为纯文本格式"""
-    if not result.success:
-        return f"AI 分析失败: {result.error}"
-
-    lines = ["【✨ AI 热点分析】", ""]
-
-    if result.core_trends:
-        lines.extend(["[核心热点态势]", _format_list_content(result.core_trends), ""])
-
-    if result.sentiment_controversy:
-        lines.extend(
-            ["[舆论风向争议]", _format_list_content(result.sentiment_controversy), ""]
-        )
-
-    if result.signals:
-        lines.extend(["[异动与弱信号]", _format_list_content(result.signals), ""])
-
-    if result.rss_insights:
-        lines.extend(["[RSS 深度洞察]", _format_list_content(result.rss_insights), ""])
-
-    if result.outlook_strategy:
-        lines.extend(["[研判策略建议]", _format_list_content(result.outlook_strategy), ""])
-
-    if result.stock_watchlist:
-        lines.extend(["[股票候选观察]", _format_list_content(result.stock_watchlist), ""])
-
-    if result.standalone_summaries:
-        summaries_text = _format_standalone_summaries(result.standalone_summaries)
-        if summaries_text:
-            lines.extend(["[独立源点速览]", summaries_text])
-
-    return "\n".join(lines)
-
-
-def get_ai_analysis_renderer(channel: str):
-    """根据渠道获取对应的渲染函数"""
-    renderers = {
-        "feishu": render_ai_analysis_feishu,
-        "dingtalk": render_ai_analysis_dingtalk,
-        "wework": render_ai_analysis_markdown,
-        "telegram": render_ai_analysis_markdown,
-        "email": render_ai_analysis_html_rich,  # 邮件使用丰富样式，配合 HTML 报告的 CSS
-        "ntfy": render_ai_analysis_markdown,
-        "bark": render_ai_analysis_plain,
-        "slack": render_ai_analysis_markdown,
-    }
-    return renderers.get(channel, render_ai_analysis_markdown)
-
-
-def render_ai_analysis_html_rich(result: AIAnalysisResult) -> str:
-    """渲染为丰富样式的 HTML 格式（HTML 报告用）"""
-    if not result:
-        return ""
-
-    # 检查是否成功
-    if not result.success:
-        error_msg = result.error or "未知错误"
-        return f"""
-                <div class="ai-section">
-                    <div class="ai-error">⚠️ AI 分析失败: {_escape_html(str(error_msg))}</div>
-                </div>"""
-
-    ai_html = """
-                <div class="ai-section">
-                    <div class="ai-section-header">
-                        <div class="ai-section-title">✨ AI 热点分析</div>
-                        <span class="ai-section-badge">AI</span>
-                    </div>"""
-
-    if result.core_trends:
-        content = _format_list_content(result.core_trends)
-        content_html = _escape_html(content).replace("\n", "<br>")
-        ai_html += f"""
-                    <div class="ai-block">
-                        <div class="ai-block-title">核心热点态势</div>
-                        <div class="ai-block-content">{content_html}</div>
-                    </div>"""
-
-    if result.sentiment_controversy:
-        content = _format_list_content(result.sentiment_controversy)
-        content_html = _escape_html(content).replace("\n", "<br>")
-        ai_html += f"""
-                    <div class="ai-block">
-                        <div class="ai-block-title">舆论风向争议</div>
-                        <div class="ai-block-content">{content_html}</div>
-                    </div>"""
-
-    if result.signals:
-        content = _format_list_content(result.signals)
-        content_html = _escape_html(content).replace("\n", "<br>")
-        ai_html += f"""
-                    <div class="ai-block">
-                        <div class="ai-block-title">异动与弱信号</div>
-                        <div class="ai-block-content">{content_html}</div>
-                    </div>"""
-
-    if result.rss_insights:
-        content = _format_list_content(result.rss_insights)
-        content_html = _escape_html(content).replace("\n", "<br>")
-        ai_html += f"""
-                    <div class="ai-block">
-                        <div class="ai-block-title">RSS 深度洞察</div>
-                        <div class="ai-block-content">{content_html}</div>
-                    </div>"""
-
-    if result.outlook_strategy:
-        content = _format_list_content(result.outlook_strategy)
-        content_html = _escape_html(content).replace("\n", "<br>")
-        ai_html += f"""
-                    <div class="ai-block">
-                        <div class="ai-block-title">研判策略建议</div>
-                        <div class="ai-block-content">{content_html}</div>
-                    </div>"""
-
-    if result.stock_watchlist:
-        content = _format_list_content(result.stock_watchlist)
-        content_html = _escape_html(content).replace("\n", "<br>")
-        ai_html += f"""
-                    <div class="ai-block">
-                        <div class="ai-block-title">股票候选观察</div>
-                        <div class="ai-block-content">{content_html}</div>
-                    </div>"""
-
-    if result.standalone_summaries:
-        summaries_text = _format_standalone_summaries(result.standalone_summaries)
-        if summaries_text:
-            summaries_html = _escape_html(summaries_text).replace("\n", "<br>")
-            ai_html += f"""
-                    <div class="ai-block">
-                        <div class="ai-block-title">独立源点速览</div>
-                        <div class="ai-block-content">{summaries_html}</div>
-                    </div>"""
-
-    ai_html += """
-                </div>"""
-    return ai_html
-
-
-# coding=utf-8
-"""
 AI 分析器模块
 
 调用 AI 大模型对热点新闻进行深度分析
@@ -533,7 +90,7 @@ class AIAnalyzer:
         prompt_path = config_dir / prompt_file
 
         if not prompt_path.exists():
-            print(f"[AI] 提示词文件不存在: {prompt_path}")
+            print(f"[AI] 提示词文件不存��: {prompt_path}")
             return "", ""
 
         content = prompt_path.read_text(encoding="utf-8")
@@ -547,13 +104,11 @@ class AIAnalyzer:
             system_part = parts[0]
             user_part = parts[1] if len(parts) > 1 else ""
 
-            # 提取 system 内容
             if "[system]" in system_part:
                 system_prompt = system_part.split("[system]")[1].strip()
 
             user_prompt = user_part.strip()
         else:
-            # 整个文件作为 user prompt
             user_prompt = content
 
         return system_prompt, user_prompt
@@ -583,7 +138,6 @@ class AIAnalyzer:
             AIAnalysisResult: 分析结果
         """
 
-        # 打印配置信息方便调试
         model = self.ai_config.get("MODEL", "unknown")
         api_key = self.client.api_key or ""
         api_base = self.ai_config.get("API_BASE", "")
@@ -606,7 +160,6 @@ class AIAnalyzer:
                 error="未配置 AI API Key，请在 config.yaml 或环境变量 AI_API_KEY 中设置"
             )
 
-        # 准备新闻内容并获取统计数据
         news_content, rss_content, hotlist_total, rss_total, analyzed_count = self._prepare_news_content(stats, rss_stats)
         total_news = hotlist_total + rss_total
 
@@ -618,17 +171,14 @@ class AIAnalyzer:
                 hotlist_count=hotlist_total,
                 rss_count=rss_total,
                 analyzed_news=0,
-                max_news_limit=self.max_news
+                max_news_limit=self.max_news,
             )
 
-        # 构建提示词
         current_time = self.get_time_func().strftime("%Y-%m-%d %H:%M:%S")
 
-        # 提取关键词
         if not keywords:
             keywords = [s.get("word", "") for s in stats if s.get("word")] if stats else []
 
-        # 使用安全的字符串替换，避免模板中其他花括号（如 JSON 示例）被误解析
         user_prompt = self.user_prompt_template
         user_prompt = user_prompt.replace("{report_mode}", report_mode)
         user_prompt = user_prompt.replace("{report_type}", report_type)
@@ -641,7 +191,6 @@ class AIAnalyzer:
         user_prompt = user_prompt.replace("{rss_content}", rss_content)
         user_prompt = user_prompt.replace("{language}", self.language)
 
-        # 构建独立展示区内容
         standalone_content = ""
         if self.include_standalone and standalone_data:
             standalone_content = self._prepare_standalone_content(standalone_data)
@@ -658,20 +207,16 @@ class AIAnalyzer:
             print(user_prompt)
             print("=" * 80 + "\n")
 
-        # 调用 AI API（使用 LiteLLM）
         try:
             response = self._call_ai(user_prompt)
             result = self._parse_response(response)
 
-            # 如果配置未启用 RSS 分析，强制清空 AI 返回的 RSS 洞察
             if not self.include_rss:
                 result.rss_insights = ""
 
-            # 如果配置未启用 standalone 分析，强制清空
             if not self.include_standalone:
                 result.standalone_summaries = {}
 
-            # 填充统计数据
             result.total_news = total_news
             result.hotlist_count = hotlist_total
             result.rss_count = rss_total
@@ -681,16 +226,10 @@ class AIAnalyzer:
         except Exception as e:
             error_type = type(e).__name__
             error_msg = str(e)
-
-            # 截断过长的错误消息
             if len(error_msg) > 200:
                 error_msg = error_msg[:200] + "..."
             friendly_msg = f"AI 分析失败 ({error_type}): {error_msg}"
-
-            return AIAnalysisResult(
-                success=False,
-                error=friendly_msg
-            )
+            return AIAnalysisResult(success=False, error=friendly_msg)
 
     def _prepare_news_content(
         self,
@@ -711,11 +250,9 @@ class AIAnalyzer:
         news_count = 0
         rss_count = 0
 
-        # 计算总新闻数
         hotlist_total = sum(len(s.get("titles", [])) for s in stats) if stats else 0
         rss_total = sum(len(s.get("titles", [])) for s in rss_stats) if rss_stats else 0
 
-        # 热榜内容
         if stats:
             for stat in stats:
                 word = stat.get("word", "")
@@ -729,16 +266,12 @@ class AIAnalyzer:
                         if not title:
                             continue
 
-                        # 来源
                         source = t.get("source_name", t.get("source", ""))
-
-                        # 构建行
                         if source:
                             line = f"- [{source}] {title}"
                         else:
                             line = f"- {title}"
 
-                        # 始终显示简化格式：排名范围 + 时间范围 + 出现次数
                         ranks = t.get("ranks", [])
                         if ranks:
                             min_rank = min(ranks)
@@ -750,12 +283,10 @@ class AIAnalyzer:
                         first_time = t.get("first_time", "")
                         last_time = t.get("last_time", "")
                         time_str = self._format_time_range(first_time, last_time)
-
                         appear_count = t.get("count", 1)
 
                         line += f" | 排名:{rank_str} | 时间:{time_str} | 出现:{appear_count}次"
 
-                        # 开启完整时间线时，额外添加轨迹
                         if self.include_rank_timeline:
                             rank_timeline = t.get("rank_timeline", [])
                             timeline_str = self._format_rank_timeline(rank_timeline)
@@ -769,7 +300,6 @@ class AIAnalyzer:
                 if news_count >= self.max_news:
                     break
 
-        # RSS 内容（仅在启用时构建）
         if self.include_rss and rss_stats:
             remaining = self.max_news - news_count
             for stat in rss_stats:
@@ -786,13 +316,9 @@ class AIAnalyzer:
                         if not title:
                             continue
 
-                        # 来源
                         source = t.get("source_name", t.get("feed_name", ""))
-
-                        # 发布时间
                         time_display = t.get("time_display", "")
 
-                        # 构建行：[来源] 标题 | 发布时间
                         if source:
                             line = f"- [{source}] {title}"
                         else:
@@ -825,16 +351,14 @@ class AIAnalyzer:
         def extract_time(time_str: str) -> str:
             if not time_str:
                 return "-"
-            # 尝试提取 HH:MM 部分
             if " " in time_str:
                 parts = time_str.split(" ")
                 if len(parts) >= 2:
                     time_part = parts[1]
                     if ":" in time_part:
-                        return time_part[:5]  # HH:MM
+                        return time_part[:5]
             elif ":" in time_str:
                 return time_str[:5]
-            # 处理 HH-MM 格式
             result = time_str[:5] if len(time_str) >= 5 else time_str
             if len(result) == 5 and result[2] == '-':
                 result = result.replace('-', ':')
@@ -877,7 +401,6 @@ class AIAnalyzer:
         """
         lines = []
 
-        # 热榜平台
         for platform in standalone_data.get("platforms", []):
             platform_id = platform.get("id", "")
             platform_name = platform.get("name", platform_id)
@@ -893,7 +416,6 @@ class AIAnalyzer:
 
                 line = f"- {title}"
 
-                # 排名信息
                 ranks = item.get("ranks", [])
                 if ranks:
                     min_rank = min(ranks)
@@ -901,19 +423,16 @@ class AIAnalyzer:
                     rank_str = f"{min_rank}" if min_rank == max_rank else f"{min_rank}-{max_rank}"
                     line += f" | 排名:{rank_str}"
 
-                # 时间范围
                 first_time = item.get("first_time", "")
                 last_time = item.get("last_time", "")
                 if first_time:
                     time_str = self._format_time_range(first_time, last_time)
                     line += f" | 时间:{time_str}"
 
-                # 出现次数
                 count = item.get("count", 1)
                 if count > 1:
                     line += f" | 出现:{count}次"
 
-                # 排名轨迹（如果启用）
                 if self.include_rank_timeline:
                     rank_timeline = item.get("rank_timeline", [])
                     if rank_timeline:
@@ -923,7 +442,6 @@ class AIAnalyzer:
                 lines.append(line)
             lines.append("")
 
-        # RSS 源
         for feed in standalone_data.get("rss_feeds", []):
             feed_id = feed.get("id", "")
             feed_name = feed.get("name", feed_id)
@@ -978,7 +496,6 @@ class AIAnalyzer:
 
             data = json.loads(json_str)
 
-            # 新版字段解析
             result.core_trends = data.get("core_trends", "")
             result.sentiment_controversy = data.get("sentiment_controversy", "")
             result.signals = data.get("signals", "")
@@ -986,7 +503,6 @@ class AIAnalyzer:
             result.outlook_strategy = data.get("outlook_strategy", "")
             result.stock_watchlist = data.get("stock_watchlist", "")
 
-            # 解析独立展示区概括
             summaries = data.get("standalone_summaries", {})
             if isinstance(summaries, dict):
                 result.standalone_summaries = {
@@ -1000,7 +516,6 @@ class AIAnalyzer:
             result.error = f"JSON 解析错误 (位置 {e.pos}): {e.msg}"
             if error_context:
                 result.error += f"，上下文: ...{error_context}..."
-            # 使用原始响应填充 core_trends，确保有输出
             result.core_trends = response[:500] + "..." if len(response) > 500 else response
             result.success = True
         except (IndexError, KeyError, TypeError, ValueError) as e:
