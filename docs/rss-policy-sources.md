@@ -1,29 +1,31 @@
-# TrendRadar RSS 来源说明与边界
+# Official RSS source notes and analysis boundaries
 
-`config/config.yaml` 中的 RSS 列表按官方机构和用途标注：
+The RSS entries in `config/config.yaml` are labeled by institution and intended use:
 
-- `cn_policy_*`：国内政策与货币政策。当前配置了中国人民银行公开的英文 RSS；中国官方部门的公开、稳定 RSS 地址较少，因此其余国内新闻平台仅用于发现线索，不能当作政策原文。
-- `intl_*`：央行、国际清算银行、OECD、监管机构及官方统计发布。
-- `impact_cn_*`：可作为国内传导分析输入的国际能源数据/解读来源。国际源不等于国内影响的直接证据。
+- `cn_policy_*`: China policy and monetary policy. Public stable RSS availability from Chinese government sites is limited; do not treat secondary discovery sources as official policy text.
+- `intl_*`: central banks, international bodies, regulators, and official statistics.
+- `impact_cn_*`: international energy or macro context that may help analyze transmission to China. An international release alone is not proof of a domestic impact.
 
-## 已配置的官方��开订阅地址
+## Configured public feeds
 
-| 配置 ID | 机构 | 地址 | 用途 |
+| Config ID | Institution | Feed URL | Purpose |
 |---|---|---|---|
-| `cn_policy_pbc` | 中国人民银行 | `http://www.pbc.gov.cn/en/3688110/index.rss` | 国内货币政策与央行发布（英文页面） |
-| `intl_us_federal_reserve` | 美国联邦储备委员会 | `https://www.federalreserve.gov/feeds/press_all.xml` | 美国货币政策与公告 |
-| `intl_eu_ecb` | 欧洲中央银行 | `https://www.ecb.europa.eu/rss/press.html` | 欧元区政策与公告 |
-| `intl_uk_boe` | 英格兰银行 | `https://www.bankofengland.co.uk/rss/news` | 英国央行新闻 |
-| `intl_jp_boj` | 日本银行 | `https://www.boj.or.jp/en/rss/whatsnew.xml` | 日本央行英文公告 |
-| `intl_global_bis` | 国际清算银行 | `https://www.bis.org/rss.xml` | 国际金融与监管合作 |
-| `intl_global_oecd` | OECD | `https://www.oecd.org/rss/generalrss.xml` | 国际经济与政策发布 |
-| `intl_us_sec` | 美国证券交易委员会 | `https://www.sec.gov/news/pressreleases.rss` | 美国证券监管发布 |
-| `impact_cn_energy_eia` | 美国能源信息署 | `https://www.eia.gov/rss/todayinenergy.xml` | 能源数据与分析；用于监测潜在成本传导 |
-| `intl_us_bls` | 美国劳工统计局 | `https://www.bls.gov/feed/news_release/rss.xml` | 美国就业、通胀等统计发布 |
-| `intl_us_bea` | 美国经济分析局 | `https://www.bea.gov/rss/news_releases.xml` | 美国国民经济与国际收支统计 |
+| `cn_policy_pbc` | People's Bank of China | `http://www.pbc.gov.cn/en/3688110/index.rss` | Domestic monetary policy and PBOC releases (English) |
+| `intl_us_federal_reserve` | Federal Reserve | `https://www.federalreserve.gov/feeds/press_all.xml` | US monetary policy and announcements |
+| `intl_eu_ecb` | European Central Bank | `https://www.ecb.europa.eu/rss/press.html` | Euro area policy and announcements |
+| `intl_uk_boe` | Bank of England | `https://www.bankofengland.co.uk/rss/news` | UK central-bank news |
+| `intl_jp_boj` | Bank of Japan | `https://www.boj.or.jp/en/rss/whatsnew.xml` | BOJ announcements (English) |
+| `intl_global_bis` | Bank for International Settlements | `https://www.bis.org/rss.xml` | International finance and regulatory cooperation |
+| `intl_global_oecd` | OECD | `https://www.oecd.org/rss/generalrss.xml` | International economic and policy publications |
+| `intl_us_sec` | US Securities and Exchange Commission | `https://www.sec.gov/news/pressreleases.rss` | US securities-regulator releases |
+| `impact_cn_energy_eia` | US Energy Information Administration | `https://www.eia.gov/rss/todayinenergy.xml` | Energy data and analysis; potential cost-transmission context |
+| `intl_us_bls` | US Bureau of Labor Statistics | `https://www.bls.gov/feed/news_release/rss.xml` | US employment and inflation statistics |
+| `intl_us_bea` | US Bureau of Economic Analysis | `https://www.bea.gov/rss/news_releases.xml` | US national accounts and international economic statistics |
 
-## 部署前检查
+Feeds can change, rate-limit, or become temporarily unavailable. Check crawler logs after deployment and verify failed endpoints on the institution's official website before changing a URL. Do not label news aggregators, media commentary, or secondary reports as official policy. Do not guess RSS URLs for Chinese departments when a stable public feed has not been confirmed.
 
-RSS 服务可能调整地址、限流或暂时不可用；部署后请检查运行日志中的 RSS 抓取结果。对于返回错误的源，先访问官网确认最新地址，再更新配置。不要把搜索聚合源、媒体评论或非官方转载标记为“官方政策”。若需中文国内政策原文，建议从国务院及相关部委官网查找其当前公开订阅/API；未确认稳定 RSS 前不要猜测 URL。
+The RSS schema in this project has no category field, so the category is currently represented in feed IDs and display names. Policy analysis prompt: `config/ai_policy_analysis_prompt.txt`.
 
-本项目 RSS 条目结构没有分类字段，因此分类目前写在 `id` 和 `name` 中。AI 分析提示词配置在 `config/ai_policy_analysis_prompt.txt`。
+## Stock candidate watchlist
+
+The policy analysis prompt includes a `stock_watchlist` field for a maximum of three **news-linked research candidates**, not buy recommendations. It must not invent securities, tickers, or a company-benefit link; it may return fewer than three or no candidates when the supplied evidence is insufficient. TrendRadar currently does not supply verified stock master data, real-time prices, valuation, or financial statements to this analysis, so those dimensions must be explicitly marked as unevaluated. See `docs/stock-watchlist.md`.
