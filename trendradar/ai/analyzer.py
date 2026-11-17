@@ -1,9 +1,6 @@
 # coding=utf-8
 """
-AI 分析器模块
-
-调用 AI 大模型对热点新闻进行深度分析
-基于 LiteLLM 统一接口，支持 100+ AI 提供商
+AI 分析器：将热点与 RSS 输入交给 LiteLLM，并解析结构化简报。
 """
 
 import json
@@ -16,32 +13,36 @@ from trendradar.ai.client import AIClient
 
 @dataclass
 class AIAnalysisResult:
-    """AI 分析结果"""
-    # 新版 5 核心板块
-    core_trends: str = ""                # 核心热点与舆情态势
-    sentiment_controversy: str = ""      # 舆论风向与争议
-    signals: str = ""                    # 异动与弱信号
-    rss_insights: str = ""               # RSS 深度洞察
-    outlook_strategy: str = ""           # 研判与策略建议
-    stock_watchlist: str = ""            # 股票候选观察清单
-    standalone_summaries: Dict[str, str] = field(default_factory=dict)  # 独立展示区概括 {源ID: 概括}
-
-    # 基础元数据
-    raw_response: str = ""               # 原始响应
-    success: bool = False                # 是否成功
-    error: str = ""                      # 错误信息
-
-    # 新闻数量统计
-    total_news: int = 0                  # 总新闻数（热榜+RSS）
-    analyzed_news: int = 0               # 实际分析的新闻数
-    max_news_limit: int = 0              # 分析上限配置值
-    hotlist_count: int = 0               # 热榜新闻数
-    rss_count: int = 0                   # RSS 新闻数
-    ai_mode: str = ""                    # AI 分析使用的模式 (daily/current/incremental)
+    """AI 分析结果；文本板块均使用简体中文。"""
+    core_trends: str = ""
+    sentiment_controversy: str = ""
+    signals: str = ""
+    rss_insights: str = ""
+    outlook_strategy: str = ""
+    stock_watchlist: str = ""
+    standalone_summaries: Dict[str, str] = field(default_factory=dict)
+    raw_response: str = ""
+    success: bool = False
+    error: str = ""
+    total_news: int = 0
+    analyzed_news: int = 0
+    max_news_limit: int = 0
+    hotlist_count: int = 0
+    rss_count: int = 0
+    ai_mode: str = ""
 
 
 class AIAnalyzer:
-    """AI 分析器"""
+    """使用 AI 对新闻热点及其国内影响进行分析。"""
+
+    TEXT_FIELDS = (
+        "core_trends",
+        "sentiment_controversy",
+        "signals",
+        "rss_insights",
+        "outlook_strategy",
+        "stock_watchlist",
+    )
 
     def __init__(
         self,
@@ -50,68 +51,39 @@ class AIAnalyzer:
         get_time_func: Callable,
         debug: bool = False,
     ):
-        """
-        初始化 AI 分析器
-
-        Args:
-            ai_config: AI 模型配置（LiteLLM 格式）
-            analysis_config: AI 分析功能配置（language, prompt_file 等）
-            get_time_func: 获取当前时间的函数
-            debug: 是否开启调试模式
-        """
         self.ai_config = ai_config
         self.analysis_config = analysis_config
         self.get_time_func = get_time_func
         self.debug = debug
-
-        # 创建 AI 客户端（基于 LiteLLM）
         self.client = AIClient(ai_config)
 
-        # 验证配置
         valid, error = self.client.validate_config()
         if not valid:
             print(f"[AI] 配置警告: {error}")
 
-        # 从分析配置获取功能参数
         self.max_news = analysis_config.get("MAX_NEWS_FOR_ANALYSIS", 50)
         self.include_rss = analysis_config.get("INCLUDE_RSS", True)
         self.include_rank_timeline = analysis_config.get("INCLUDE_RANK_TIMELINE", False)
         self.include_standalone = analysis_config.get("INCLUDE_STANDALONE", False)
         self.language = analysis_config.get("LANGUAGE", "Chinese")
-
-        # 加载提示词模板
         self.system_prompt, self.user_prompt_template = self._load_prompt_template(
             analysis_config.get("PROMPT_FILE", "ai_analysis_prompt.txt")
         )
 
     def _load_prompt_template(self, prompt_file: str) -> tuple:
-        """加载提示词模板"""
-        config_dir = Path(__file__).parent.parent.parent / "config"
-        prompt_path = config_dir / prompt_file
-
+        """加载并拆分 [system] / [user] 提示词。"""
+        prompt_path = Path(__file__).parent.parent.parent / "config" / prompt_file
         if not prompt_path.exists():
-            print(f"[AI] 提示词文件不存��: {prompt_path}")
+            message = f"[AI] 提示词文件不存在: {prompt_path}"
+            print(message)
             return "", ""
 
         content = prompt_path.read_text(encoding="utf-8")
-
-        # 解析 [system] 和 [user] 部分
-        system_prompt = ""
-        user_prompt = ""
-
         if "[system]" in content and "[user]" in content:
-            parts = content.split("[user]")
-            system_part = parts[0]
-            user_part = parts[1] if len(parts) > 1 else ""
-
-            if "[system]" in system_part:
-                system_prompt = system_part.split("[system]")[1].strip()
-
-            user_prompt = user_part.strip()
-        else:
-            user_prompt = content
-
-        return system_prompt, user_prompt
+            before_user, user_part = content.split("[user]", 1)
+            system_prompt = before_user.split("[system]", 1)[1].strip()
+            return system_prompt, user_part.strip()
+        return "", content
 
     def analyze(
         self,
@@ -123,185 +95,135 @@ class AIAnalyzer:
         keywords: Optional[List[str]] = None,
         standalone_data: Optional[Dict] = None,
     ) -> AIAnalysisResult:
-        """
-        执行 AI 分析
-
-        Args:
-            stats: 热榜统计数据
-            rss_stats: RSS 统计数据
-            report_mode: 报告模式
-            report_type: 报告类型
-            platforms: 平台列表
-            keywords: 关键词列表
-
-        Returns:
-            AIAnalysisResult: 分析结果
-        """
-
+        """执行分析并返回各字段完整的结构化结果。"""
         model = self.ai_config.get("MODEL", "unknown")
         api_key = self.client.api_key or ""
         api_base = self.ai_config.get("API_BASE", "")
         masked_key = f"{api_key[:5]}******" if len(api_key) >= 5 else "******"
-        model_display = model.replace("/", "/\u200b") if model else "unknown"
-
-        print(f"[AI] 模型: {model_display}")
+        print(f"[AI] 模型: {model.replace('/', '/\\u200b') if model else 'unknown'}")
         print(f"[AI] Key : {masked_key}")
-
         if api_base:
-            print(f"[AI] 接口: 存在自定义 API 端点")
-
-        timeout = self.ai_config.get("TIMEOUT", 120)
-        max_tokens = self.ai_config.get("MAX_TOKENS", 5000)
-        print(f"[AI] 参数: timeout={timeout}, max_tokens={max_tokens}")
+            print("[AI] 接口: 存在自定义 API 端点")
+        print(
+            f"[AI] 参数: timeout={self.ai_config.get('TIMEOUT', 120)}, "
+            f"max_tokens={self.ai_config.get('MAX_TOKENS', 5000)}"
+        )
 
         if not self.client.api_key:
             return AIAnalysisResult(
                 success=False,
-                error="未配置 AI API Key，请在 config.yaml 或环境变量 AI_API_KEY 中设置"
+                error="未配置 AI API Key，请在 config.yaml 或环境变量 AI_API_KEY 中设置",
             )
 
-        news_content, rss_content, hotlist_total, rss_total, analyzed_count = self._prepare_news_content(stats, rss_stats)
-        total_news = hotlist_total + rss_total
-
+        news_content, rss_content, hotlist_total, rss_total, analyzed_count = (
+            self._prepare_news_content(stats, rss_stats)
+        )
         if not news_content and not rss_content:
             return AIAnalysisResult(
                 success=False,
                 error="没有可分析的新闻内容",
-                total_news=total_news,
+                total_news=hotlist_total + rss_total,
                 hotlist_count=hotlist_total,
                 rss_count=rss_total,
                 analyzed_news=0,
                 max_news_limit=self.max_news,
             )
 
+        keywords = keywords or [s.get("word", "") for s in (stats or []) if s.get("word")]
         current_time = self.get_time_func().strftime("%Y-%m-%d %H:%M:%S")
-
-        if not keywords:
-            keywords = [s.get("word", "") for s in stats if s.get("word")] if stats else []
-
+        replacements = {
+            "{report_mode}": report_mode,
+            "{report_type}": report_type,
+            "{current_time}": current_time,
+            "{news_count}": str(hotlist_total),
+            "{rss_count}": str(rss_total),
+            "{platforms}": ", ".join(platforms) if platforms else "多平台",
+            "{keywords}": ", ".join(keywords[:20]) if keywords else "无",
+            "{news_content}": news_content,
+            "{rss_content}": rss_content,
+            "{language}": self.language,
+            "{standalone_content}": (
+                self._prepare_standalone_content(standalone_data)
+                if self.include_standalone and standalone_data else ""
+            ),
+        }
         user_prompt = self.user_prompt_template
-        user_prompt = user_prompt.replace("{report_mode}", report_mode)
-        user_prompt = user_prompt.replace("{report_type}", report_type)
-        user_prompt = user_prompt.replace("{current_time}", current_time)
-        user_prompt = user_prompt.replace("{news_count}", str(hotlist_total))
-        user_prompt = user_prompt.replace("{rss_count}", str(rss_total))
-        user_prompt = user_prompt.replace("{platforms}", ", ".join(platforms) if platforms else "多平台")
-        user_prompt = user_prompt.replace("{keywords}", ", ".join(keywords[:20]) if keywords else "无")
-        user_prompt = user_prompt.replace("{news_content}", news_content)
-        user_prompt = user_prompt.replace("{rss_content}", rss_content)
-        user_prompt = user_prompt.replace("{language}", self.language)
-
-        standalone_content = ""
-        if self.include_standalone and standalone_data:
-            standalone_content = self._prepare_standalone_content(standalone_data)
-        user_prompt = user_prompt.replace("{standalone_content}", standalone_content)
+        for placeholder, value in replacements.items():
+            user_prompt = user_prompt.replace(placeholder, value)
 
         if self.debug:
             print("\n" + "=" * 80)
             print("[AI 调试] 发送给 AI 的完整提示词")
             print("=" * 80)
             if self.system_prompt:
-                print("\n--- System Prompt ---")
-                print(self.system_prompt)
-            print("\n--- User Prompt ---")
-            print(user_prompt)
+                print("\n--- System Prompt ---\n" + self.system_prompt)
+            print("\n--- User Prompt ---\n" + user_prompt)
             print("=" * 80 + "\n")
 
         try:
-            response = self._call_ai(user_prompt)
-            result = self._parse_response(response)
-
+            result = self._parse_response(self._call_ai(user_prompt))
             if not self.include_rss:
                 result.rss_insights = ""
-
             if not self.include_standalone:
                 result.standalone_summaries = {}
-
-            result.total_news = total_news
+            result.total_news = hotlist_total + rss_total
             result.hotlist_count = hotlist_total
             result.rss_count = rss_total
             result.analyzed_news = analyzed_count
             result.max_news_limit = self.max_news
             return result
-        except Exception as e:
-            error_type = type(e).__name__
-            error_msg = str(e)
-            if len(error_msg) > 200:
-                error_msg = error_msg[:200] + "..."
-            friendly_msg = f"AI 分析失败 ({error_type}): {error_msg}"
-            return AIAnalysisResult(success=False, error=friendly_msg)
+        except Exception as exc:
+            message = str(exc)
+            if len(message) > 200:
+                message = message[:200] + "..."
+            return AIAnalysisResult(
+                success=False,
+                error=f"AI 分析失败 ({type(exc).__name__}): {message}",
+            )
 
     def _prepare_news_content(
-        self,
-        stats: List[Dict],
-        rss_stats: Optional[List[Dict]] = None,
+        self, stats: List[Dict], rss_stats: Optional[List[Dict]] = None
     ) -> tuple:
-        """
-        准备新闻内容文本（增强版）
-
-        热榜新闻包含：来源、标题、排名范围、时间范围、出现次数
-        RSS 包含：来源、标题、发布时间
-
-        Returns:
-            tuple: (news_content, rss_content, hotlist_total, rss_total, analyzed_count)
-        """
-        news_lines = []
-        rss_lines = []
+        """准备热榜和 RSS 文本，遵守 MAX_NEWS_FOR_ANALYSIS 上限。"""
+        news_lines: List[str] = []
+        rss_lines: List[str] = []
         news_count = 0
         rss_count = 0
+        stats = stats or []
+        rss_stats = rss_stats or []
+        hotlist_total = sum(len(s.get("titles", [])) for s in stats)
+        rss_total = sum(len(s.get("titles", [])) for s in rss_stats)
 
-        hotlist_total = sum(len(s.get("titles", [])) for s in stats) if stats else 0
-        rss_total = sum(len(s.get("titles", [])) for s in rss_stats) if rss_stats else 0
-
-        if stats:
-            for stat in stats:
-                word = stat.get("word", "")
-                titles = stat.get("titles", [])
-                if word and titles:
-                    news_lines.append(f"\n**{word}** ({len(titles)}条)")
-                    for t in titles:
-                        if not isinstance(t, dict):
-                            continue
-                        title = t.get("title", "")
-                        if not title:
-                            continue
-
-                        source = t.get("source_name", t.get("source", ""))
-                        if source:
-                            line = f"- [{source}] {title}"
-                        else:
-                            line = f"- {title}"
-
-                        ranks = t.get("ranks", [])
-                        if ranks:
-                            min_rank = min(ranks)
-                            max_rank = max(ranks)
-                            rank_str = f"{min_rank}" if min_rank == max_rank else f"{min_rank}-{max_rank}"
-                        else:
-                            rank_str = "-"
-
-                        first_time = t.get("first_time", "")
-                        last_time = t.get("last_time", "")
-                        time_str = self._format_time_range(first_time, last_time)
-                        appear_count = t.get("count", 1)
-
-                        line += f" | 排名:{rank_str} | 时间:{time_str} | 出现:{appear_count}次"
-
-                        if self.include_rank_timeline:
-                            rank_timeline = t.get("rank_timeline", [])
-                            timeline_str = self._format_rank_timeline(rank_timeline)
-                            line += f" | 轨迹:{timeline_str}"
-
-                        news_lines.append(line)
-
-                        news_count += 1
-                        if news_count >= self.max_news:
-                            break
+        for stat in stats:
+            if news_count >= self.max_news:
+                break
+            word = stat.get("word", "")
+            titles = stat.get("titles", [])
+            if word and titles:
+                news_lines.append(f"\n**{word}** ({len(titles)}条)")
+            for item in titles:
                 if news_count >= self.max_news:
                     break
+                if not isinstance(item, dict) or not item.get("title"):
+                    continue
+                source = item.get("source_name", item.get("source", ""))
+                line = f"- [{source}] {item['title']}" if source else f"- {item['title']}"
+                ranks = item.get("ranks") or []
+                rank_text = "-"
+                if ranks:
+                    low, high = min(ranks), max(ranks)
+                    rank_text = str(low) if low == high else f"{low}-{high}"
+                time_text = self._format_time_range(
+                    item.get("first_time", ""), item.get("last_time", "")
+                )
+                line += f" | 排名:{rank_text} | 时间:{time_text} | 出现:{item.get('count', 1)}次"
+                if self.include_rank_timeline:
+                    line += f" | 轨迹:{self._format_rank_timeline(item.get('rank_timeline', []))}"
+                news_lines.append(line)
+                news_count += 1
 
-        if self.include_rss and rss_stats:
-            remaining = self.max_news - news_count
+        remaining = max(0, self.max_news - news_count)
+        if self.include_rss and remaining:
             for stat in rss_stats:
                 if rss_count >= remaining:
                     break
@@ -309,225 +231,166 @@ class AIAnalyzer:
                 titles = stat.get("titles", [])
                 if word and titles:
                     rss_lines.append(f"\n**{word}** ({len(titles)}条)")
-                    for t in titles:
-                        if not isinstance(t, dict):
-                            continue
-                        title = t.get("title", "")
-                        if not title:
-                            continue
+                for item in titles:
+                    if rss_count >= remaining:
+                        break
+                    if not isinstance(item, dict) or not item.get("title"):
+                        continue
+                    source = item.get("source_name", item.get("feed_name", ""))
+                    line = f"- [{source}] {item['title']}" if source else f"- {item['title']}"
+                    if item.get("time_display"):
+                        line += f" | {item['time_display']}"
+                    rss_lines.append(line)
+                    rss_count += 1
 
-                        source = t.get("source_name", t.get("feed_name", ""))
-                        time_display = t.get("time_display", "")
-
-                        if source:
-                            line = f"- [{source}] {title}"
-                        else:
-                            line = f"- {title}"
-                        if time_display:
-                            line += f" | {time_display}"
-                        rss_lines.append(line)
-
-                        rss_count += 1
-                        if rss_count >= remaining:
-                            break
-
-        news_content = "\n".join(news_lines) if news_lines else ""
-        rss_content = "\n".join(rss_lines) if rss_lines else ""
-        total_count = news_count + rss_count
-
-        return news_content, rss_content, hotlist_total, rss_total, total_count
+        return (
+            "\n".join(news_lines),
+            "\n".join(rss_lines),
+            hotlist_total,
+            rss_total,
+            news_count + rss_count,
+        )
 
     def _call_ai(self, user_prompt: str) -> str:
-        """调用 AI API（使用 LiteLLM）"""
+        """调用 AI API（使用 LiteLLM）。"""
         messages = []
         if self.system_prompt:
             messages.append({"role": "system", "content": self.system_prompt})
         messages.append({"role": "user", "content": user_prompt})
-
         return self.client.chat(messages)
 
     def _format_time_range(self, first_time: str, last_time: str) -> str:
-        """格式化时间范围（简化显示，只保留时分）"""
-        def extract_time(time_str: str) -> str:
-            if not time_str:
+        """格式化时间范围（仅保留时分）。"""
+        def extract_time(value: str) -> str:
+            if not value:
                 return "-"
-            if " " in time_str:
-                parts = time_str.split(" ")
-                if len(parts) >= 2:
-                    time_part = parts[1]
-                    if ":" in time_part:
-                        return time_part[:5]
-            elif ":" in time_str:
-                return time_str[:5]
-            result = time_str[:5] if len(time_str) >= 5 else time_str
-            if len(result) == 5 and result[2] == '-':
-                result = result.replace('-', ':')
-            return result
+            if " " in value:
+                parts = value.split(" ")
+                if len(parts) >= 2 and ":" in parts[1]:
+                    return parts[1][:5]
+            if ":" in value:
+                return value[:5]
+            result = value[:5] if len(value) >= 5 else value
+            return result.replace("-", ":") if len(result) == 5 and result[2] == "-" else result
 
-        first = extract_time(first_time)
-        last = extract_time(last_time)
-
-        if first == last or last == "-":
-            return first
-        return f"{first}~{last}"
+        first, last = extract_time(first_time), extract_time(last_time)
+        return first if first == last or last == "-" else f"{first}~{last}"
 
     def _format_rank_timeline(self, rank_timeline: List[Dict]) -> str:
-        """格式化排名时间线"""
+        """格式化排名时间线。"""
         if not rank_timeline:
             return "-"
-
         parts = []
         for item in rank_timeline:
             time_str = item.get("time", "")
-            if len(time_str) == 5 and time_str[2] == '-':
-                time_str = time_str.replace('-', ':')
+            if len(time_str) == 5 and time_str[2] == "-":
+                time_str = time_str.replace("-", ":")
             rank = item.get("rank")
-            if rank is None:
-                parts.append(f"0({time_str})")
-            else:
-                parts.append(f"{rank}({time_str})")
-
+            parts.append(f"{rank if rank is not None else 0}({time_str})")
         return "→".join(parts)
 
     def _prepare_standalone_content(self, standalone_data: Dict) -> str:
-        """
-        将独立展示区数据转为文本，注入 AI 分析 prompt
-
-        Args:
-            standalone_data: 独立展示区数据 {"platforms": [...], "rss_feeds": [...]}
-
-        Returns:
-            格式化的文本内容
-        """
+        """将独立展示区数据转为提示词文本。"""
         lines = []
-
         for platform in standalone_data.get("platforms", []):
-            platform_id = platform.get("id", "")
-            platform_name = platform.get("name", platform_id)
+            name = platform.get("name", platform.get("id", ""))
             items = platform.get("items", [])
             if not items:
                 continue
-
-            lines.append(f"### [{platform_name}]")
+            lines.append(f"### [{name}]")
             for item in items:
                 title = item.get("title", "")
                 if not title:
                     continue
-
                 line = f"- {title}"
-
-                ranks = item.get("ranks", [])
+                ranks = item.get("ranks") or []
                 if ranks:
-                    min_rank = min(ranks)
-                    max_rank = max(ranks)
-                    rank_str = f"{min_rank}" if min_rank == max_rank else f"{min_rank}-{max_rank}"
-                    line += f" | 排名:{rank_str}"
-
-                first_time = item.get("first_time", "")
-                last_time = item.get("last_time", "")
-                if first_time:
-                    time_str = self._format_time_range(first_time, last_time)
-                    line += f" | 时间:{time_str}"
-
-                count = item.get("count", 1)
-                if count > 1:
-                    line += f" | 出现:{count}次"
-
-                if self.include_rank_timeline:
-                    rank_timeline = item.get("rank_timeline", [])
-                    if rank_timeline:
-                        timeline_str = self._format_rank_timeline(rank_timeline)
-                        line += f" | 轨迹:{timeline_str}"
-
+                    low, high = min(ranks), max(ranks)
+                    line += f" | 排名:{low if low == high else f'{low}-{high}'}"
+                if item.get("first_time"):
+                    line += " | 时间:" + self._format_time_range(
+                        item.get("first_time", ""), item.get("last_time", "")
+                    )
+                if item.get("count", 1) > 1:
+                    line += f" | 出现:{item['count']}次"
+                if self.include_rank_timeline and item.get("rank_timeline"):
+                    line += " | 轨迹:" + self._format_rank_timeline(item["rank_timeline"])
                 lines.append(line)
             lines.append("")
 
         for feed in standalone_data.get("rss_feeds", []):
-            feed_id = feed.get("id", "")
-            feed_name = feed.get("name", feed_id)
+            name = feed.get("name", feed.get("id", ""))
             items = feed.get("items", [])
             if not items:
                 continue
-
-            lines.append(f"### [{feed_name}]")
+            lines.append(f"### [{name}]")
             for item in items:
                 title = item.get("title", "")
-                if not title:
-                    continue
-
-                line = f"- {title}"
-                published_at = item.get("published_at", "")
-                if published_at:
-                    line += f" | {published_at}"
-
-                lines.append(line)
+                if title:
+                    line = f"- {title}"
+                    if item.get("published_at"):
+                        line += f" | {item['published_at']}"
+                    lines.append(line)
             lines.append("")
-
         return "\n".join(lines)
 
-    def _parse_response(self, response: str) -> AIAnalysisResult:
-        """解析 AI 响应"""
-        result = AIAnalysisResult(raw_response=response)
+    @staticmethod
+    def _extract_json_object(response: str) -> str:
+        """提取完整 JSON 对象，兼容 Markdown code fence 和前后说明文字。"""
+        text = response.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+            if text.endswith("```"):
+                text = text[:-3]
+        start = text.find("{")
+        end = text.rfind("}")
+        if start < 0 or end < start:
+            raise ValueError("响应中没有完整 JSON 对象；可能被模型截断")
+        return text[start:end + 1]
 
+    def _parse_response(self, response: str) -> AIAnalysisResult:
+        """严格解析 AI JSON；畸形或截断响应标记失败，不伪装成完整简报。"""
+        result = AIAnalysisResult(raw_response=response or "")
         if not response or not response.strip():
             result.error = "AI 返回空响应"
             return result
 
         try:
-            json_str = response
+            data = json.loads(self._extract_json_object(response))
+            if not isinstance(data, dict):
+                raise ValueError("AI JSON 顶层必须是对象")
 
-            if "```json" in response:
-                parts = response.split("```json", 1)
-                if len(parts) > 1:
-                    code_block = parts[1]
-                    end_idx = code_block.find("```")
-                    if end_idx != -1:
-                        json_str = code_block[:end_idx]
-                    else:
-                        json_str = code_block
-            elif "```" in response:
-                parts = response.split("```", 2)
-                if len(parts) >= 2:
-                    json_str = parts[1]
-
-            json_str = json_str.strip()
-            if not json_str:
-                raise ValueError("提取的 JSON 内容为空")
-
-            data = json.loads(json_str)
-
-            result.core_trends = data.get("core_trends", "")
-            result.sentiment_controversy = data.get("sentiment_controversy", "")
-            result.signals = data.get("signals", "")
-            result.rss_insights = data.get("rss_insights", "")
-            result.outlook_strategy = data.get("outlook_strategy", "")
-            result.stock_watchlist = data.get("stock_watchlist", "")
+            defaults = {
+                "core_trends": "暂无显著国内政策或热点主线。",
+                "sentiment_controversy": "暂无显著争议或分歧。",
+                "signals": "暂无足够证据判断弱信号。",
+                "rss_insights": "暂无显著 RSS 增量。",
+                "outlook_strategy": "暂无足够证据形成可靠情景推演。",
+                "stock_watchlist": "暂无足够证据形成股票候选。非投资建议；未评估实时行情、估值及财务数据。",
+            }
+            for field_name, default in defaults.items():
+                value = data.get(field_name, default)
+                if value is None or value == "":
+                    value = default
+                if not isinstance(value, str):
+                    raise ValueError(f"AI 字段 {field_name} 必须是字符串")
+                setattr(result, field_name, value.strip())
 
             summaries = data.get("standalone_summaries", {})
-            if isinstance(summaries, dict):
-                result.standalone_summaries = {
-                    str(k): str(v) for k, v in summaries.items()
-                }
-
+            if summaries is None:
+                summaries = {}
+            if not isinstance(summaries, dict):
+                raise ValueError("AI 字段 standalone_summaries 必须是对象")
+            result.standalone_summaries = {
+                str(key): str(value) for key, value in summaries.items()
+                if value is not None and str(value).strip()
+            }
             result.success = True
-
-        except json.JSONDecodeError as e:
-            error_context = json_str[max(0, e.pos - 30):e.pos + 30] if json_str and e.pos else ""
-            result.error = f"JSON 解析错误 (位置 {e.pos}): {e.msg}"
-            if error_context:
-                result.error += f"，上下文: ...{error_context}..."
-            result.core_trends = response[:500] + "..." if len(response) > 500 else response
-            result.success = True
-        except (IndexError, KeyError, TypeError, ValueError) as e:
-            result.error = f"响应解析错误: {type(e).__name__}: {str(e)}"
-            result.core_trends = response[:500] if len(response) > 500 else response
-            result.success = True
-        except Exception as e:
-            result.error = f"解析时发生未知错误: {type(e).__name__}: {str(e)}"
-            result.core_trends = response[:500] if len(response) > 500 else response
-            result.success = True
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            result.success = False
+            result.error = f"AI 响应不完整或格式无效: {exc}"
+            print(f"[AI] {result.error}")
 
         return result
-
 
 # End of file

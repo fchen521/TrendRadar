@@ -26,72 +26,64 @@ platforms:
     - { id: "cls-telegraph", name: "财联社 电报" }
     - { id: "cls-depth", name: "财联社 深度" }
 
-# RSS uses official institutional feeds where a stable public endpoint is available.
-# IDs/names indicate analysis categories; RSS does not natively support category metadata.
 rss:
   enabled: true
   freshness_filter:
     enabled: true
     max_age_days: 3
   feeds:
-    # Domestic policy and monetary policy. China policy RSS availability is limited;
-    # use existing Chinese news platforms as supplementary discovery, not as official evidence.
     - id: "cn_policy_pbc"
       name: "国内政策｜中国人民银行（官方）"
       url: "http://www.pbc.gov.cn/en/3688110/index.rss"
       enabled: true
       max_age_days: 7
-
-    # International central banks and macro policy.
     - id: "intl_us_federal_reserve"
-      name: "国际政策｜美国联邦储备委员会（官方）"
+      name: "国际事件｜美国联邦储备委员会（外部环境）"
       url: "https://www.federalreserve.gov/feeds/press_all.xml"
       enabled: true
       max_age_days: 7
     - id: "intl_eu_ecb"
-      name: "国际政策｜欧洲中央银行（官方）"
+      name: "国际事件｜欧洲中央银行（外部环境）"
       url: "https://www.ecb.europa.eu/rss/press.html"
       enabled: true
       max_age_days: 7
     - id: "intl_uk_boe"
-      name: "国际政策｜英格兰银行（官方）"
+      name: "国际事件｜英格兰银行（外部环境）"
       url: "https://www.bankofengland.co.uk/rss/news"
       enabled: true
       max_age_days: 7
     - id: "intl_jp_boj"
-      name: "国际政策｜日本银行（官方，英文）"
+      name: "国际事件｜日本银行（外部环境）"
       url: "https://www.boj.or.jp/en/rss/whatsnew.xml"
       enabled: true
       max_age_days: 7
-
-    # Official multilateral / regulatory / energy and economic data sources.
     - id: "intl_global_bis"
-      name: "国际宏观｜国际清算银行 BIS（官方）"
+      name: "国际宏观事件｜国际清算银行 BIS"
       url: "https://www.bis.org/rss.xml"
       enabled: true
       max_age_days: 7
     - id: "intl_global_oecd"
-      name: "国际宏观｜经济合作与发展组织 OECD（官方）"
+      name: "国际宏观事件｜经济合作与发展组织 OECD"
       url: "https://www.oecd.org/rss/generalrss.xml"
       enabled: true
       max_age_days: 7
     - id: "intl_us_sec"
-      name: "国际监管｜美国证券交易委员会 SEC（官方）"
+      name: "国际市场事件｜美国证券交易委员会 SEC"
       url: "https://www.sec.gov/news/pressreleases.rss"
       enabled: true
       max_age_days: 7
     - id: "impact_cn_energy_eia"
-      name: "国内传导｜美国能源信息署 EIA（官方能源数据）"
+      name: "国内传导｜美国能源信息署 EIA 能源数据"
       url: "https://www.eia.gov/rss/todayinenergy.xml"
       enabled: true
       max_age_days: 3
     - id: "intl_us_bls"
-      name: "国际宏观｜美国劳工统计局 BLS（官方数据）"
+      name: "国际宏观数据｜美国劳工统计局 BLS"
       url: "https://www.bls.gov/feed/news_release/rss.xml"
       enabled: true
       max_age_days: 7
     - id: "intl_us_bea"
-      name: "国际宏观｜美国经济分析局 BEA���官方数据）"
+      name: "国际宏观数据｜美国经济分析局 BEA"
       url: "https://www.bea.gov/rss/news_releases.xml"
       enabled: true
       max_age_days: 7
@@ -104,7 +96,6 @@ report:
   max_news_per_keyword: 0
 
 display:
-  # Put AI synthesis ahead of the source-by-source news detail.
   region_order:
     - ai_analysis
     - hotlist
@@ -185,7 +176,7 @@ ai:
   api_base: "https://openrouter.ai/api/v1/chat/completions"
   timeout: 120
   temperature: 1.0
-  max_tokens: 5000
+  max_tokens: 7000
   num_retries: 1
   fallback_models: []
 
@@ -194,7 +185,7 @@ ai_analysis:
   language: "Chinese"
   prompt_file: "ai_policy_analysis_prompt.txt"
   mode: "follow_report"
-  max_news_for_analysis: 150
+  max_news_for_analysis: 80
   include_rss: true
   include_standalone: true
   include_rank_timeline: true
