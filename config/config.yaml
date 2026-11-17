@@ -93,7 +93,7 @@ report:
   display_mode: "keyword"
   sort_by_position_first: false
   rank_threshold: 5
-  max_news_per_keyword: 0
+  max_news_per_keyword: 3
 
 display:
   region_order:
@@ -117,7 +117,7 @@ display:
       - "intl_jp_boj"
       - "intl_global_bis"
       - "impact_cn_energy_eia"
-    max_items: 5
+    max_items: 3
 
 notification:
   enabled: true
