@@ -1,7 +1,5 @@
 # coding=utf-8
-"""
-AI 分析器：将热点与 RSS 输入交给 LiteLLM，并解析结构化简报。
-"""
+"""AI analyzer for TrendRadar news briefs."""
 
 import json
 from dataclasses import dataclass, field
@@ -13,7 +11,7 @@ from trendradar.ai.client import AIClient
 
 @dataclass
 class AIAnalysisResult:
-    """AI 分析结果；文本板块均使用简体中文。"""
+    """Structured AI analysis response."""
     core_trends: str = ""
     sentiment_controversy: str = ""
     signals: str = ""
@@ -33,7 +31,7 @@ class AIAnalysisResult:
 
 
 class AIAnalyzer:
-    """使用 AI 对新闻热点及其国内影响进行分析。"""
+    """Call the configured LLM and parse the brief JSON response."""
 
     TEXT_FIELDS = (
         "core_trends",
@@ -43,6 +41,16 @@ class AIAnalyzer:
         "outlook_strategy",
         "stock_watchlist",
     )
+    EMPTY_FIELD_TEXT = {
+        "core_trends": "暂无显著国内政策或热点主线。",
+        "sentiment_controversy": "暂无显著争议或分歧。",
+        "signals": "暂无足够证据判断弱信号。",
+        "rss_insights": "暂无显著 RSS 增量。",
+        "outlook_strategy": "暂无足够证据形成可靠情景推演。",
+        "stock_watchlist": (
+            "暂无足够证据形成股票候选。非投资建议；未评估实时行情、估值及财务数据。"
+        ),
+    }
 
     def __init__(
         self,
@@ -71,17 +79,16 @@ class AIAnalyzer:
         )
 
     def _load_prompt_template(self, prompt_file: str) -> tuple:
-        """加载并拆分 [system] / [user] 提示词。"""
+        """Load [system] and [user] prompt sections."""
         prompt_path = Path(__file__).parent.parent.parent / "config" / prompt_file
         if not prompt_path.exists():
-            message = f"[AI] 提示词文件不存在: {prompt_path}"
-            print(message)
+            print(f"[AI] 提示词文件不存在: {prompt_path}")
             return "", ""
 
         content = prompt_path.read_text(encoding="utf-8")
         if "[system]" in content and "[user]" in content:
-            before_user, user_part = content.split("[user]", 1)
-            system_prompt = before_user.split("[system]", 1)[1].strip()
+            system_part, user_part = content.split("[user]", 1)
+            system_prompt = system_part.split("[system]", 1)[1].strip()
             return system_prompt, user_part.strip()
         return "", content
 
@@ -95,12 +102,13 @@ class AIAnalyzer:
         keywords: Optional[List[str]] = None,
         standalone_data: Optional[Dict] = None,
     ) -> AIAnalysisResult:
-        """执行分析并返回各字段完整的结构化结果。"""
+        """Analyze news and return structured brief fields."""
         model = self.ai_config.get("MODEL", "unknown")
         api_key = self.client.api_key or ""
         api_base = self.ai_config.get("API_BASE", "")
         masked_key = f"{api_key[:5]}******" if len(api_key) >= 5 else "******"
-        print(f"[AI] 模型: {model.replace('/', '/\\u200b') if model else 'unknown'}")
+        model_display = model.replace("/", "/\u200b") if model else "unknown"
+        print(f"[AI] 模型: {model_display}")
         print(f"[AI] Key : {masked_key}")
         if api_base:
             print("[AI] 接口: 存在自定义 API 端点")
@@ -125,12 +133,16 @@ class AIAnalyzer:
                 total_news=hotlist_total + rss_total,
                 hotlist_count=hotlist_total,
                 rss_count=rss_total,
-                analyzed_news=0,
                 max_news_limit=self.max_news,
             )
 
-        keywords = keywords or [s.get("word", "") for s in (stats or []) if s.get("word")]
         current_time = self.get_time_func().strftime("%Y-%m-%d %H:%M:%S")
+        if not keywords:
+            keywords = [s.get("word", "") for s in (stats or []) if s.get("word")]
+        standalone_content = ""
+        if self.include_standalone and standalone_data:
+            standalone_content = self._prepare_standalone_content(standalone_data)
+
         replacements = {
             "{report_mode}": report_mode,
             "{report_type}": report_type,
@@ -142,10 +154,7 @@ class AIAnalyzer:
             "{news_content}": news_content,
             "{rss_content}": rss_content,
             "{language}": self.language,
-            "{standalone_content}": (
-                self._prepare_standalone_content(standalone_data)
-                if self.include_standalone and standalone_data else ""
-            ),
+            "{standalone_content}": standalone_content,
         }
         user_prompt = self.user_prompt_template
         for placeholder, value in replacements.items():
@@ -156,8 +165,10 @@ class AIAnalyzer:
             print("[AI 调试] 发送给 AI 的完整提示词")
             print("=" * 80)
             if self.system_prompt:
-                print("\n--- System Prompt ---\n" + self.system_prompt)
-            print("\n--- User Prompt ---\n" + user_prompt)
+                print("\n--- System Prompt ---")
+                print(self.system_prompt)
+            print("\n--- User Prompt ---")
+            print(user_prompt)
             print("=" * 80 + "\n")
 
         try:
@@ -182,17 +193,19 @@ class AIAnalyzer:
             )
 
     def _prepare_news_content(
-        self, stats: List[Dict], rss_stats: Optional[List[Dict]] = None
+        self,
+        stats: List[Dict],
+        rss_stats: Optional[List[Dict]] = None,
     ) -> tuple:
-        """准备热榜和 RSS 文本，遵守 MAX_NEWS_FOR_ANALYSIS 上限。"""
+        """Prepare ranked news and RSS text, respecting the analysis item limit."""
+        stats = stats or []
+        rss_stats = rss_stats or []
         news_lines: List[str] = []
         rss_lines: List[str] = []
         news_count = 0
         rss_count = 0
-        stats = stats or []
-        rss_stats = rss_stats or []
-        hotlist_total = sum(len(s.get("titles", [])) for s in stats)
-        rss_total = sum(len(s.get("titles", [])) for s in rss_stats)
+        hotlist_total = sum(len(item.get("titles", [])) for item in stats)
+        rss_total = sum(len(item.get("titles", [])) for item in rss_stats)
 
         for stat in stats:
             if news_count >= self.max_news:
@@ -218,7 +231,9 @@ class AIAnalyzer:
                 )
                 line += f" | 排名:{rank_text} | 时间:{time_text} | 出现:{item.get('count', 1)}次"
                 if self.include_rank_timeline:
-                    line += f" | 轨迹:{self._format_rank_timeline(item.get('rank_timeline', []))}"
+                    line += " | 轨迹:" + self._format_rank_timeline(
+                        item.get("rank_timeline", [])
+                    )
                 news_lines.append(line)
                 news_count += 1
 
@@ -252,7 +267,7 @@ class AIAnalyzer:
         )
 
     def _call_ai(self, user_prompt: str) -> str:
-        """调用 AI API（使用 LiteLLM）。"""
+        """Call AI API through LiteLLM."""
         messages = []
         if self.system_prompt:
             messages.append({"role": "system", "content": self.system_prompt})
@@ -260,7 +275,7 @@ class AIAnalyzer:
         return self.client.chat(messages)
 
     def _format_time_range(self, first_time: str, last_time: str) -> str:
-        """格式化时间范围（仅保留时分）。"""
+        """Format time range using HH:MM where possible."""
         def extract_time(value: str) -> str:
             if not value:
                 return "-"
@@ -271,13 +286,15 @@ class AIAnalyzer:
             if ":" in value:
                 return value[:5]
             result = value[:5] if len(value) >= 5 else value
-            return result.replace("-", ":") if len(result) == 5 and result[2] == "-" else result
+            if len(result) == 5 and result[2] == "-":
+                return result.replace("-", ":")
+            return result
 
         first, last = extract_time(first_time), extract_time(last_time)
         return first if first == last or last == "-" else f"{first}~{last}"
 
     def _format_rank_timeline(self, rank_timeline: List[Dict]) -> str:
-        """格式化排名时间线。"""
+        """Format ranking timeline."""
         if not rank_timeline:
             return "-"
         parts = []
@@ -290,7 +307,7 @@ class AIAnalyzer:
         return "→".join(parts)
 
     def _prepare_standalone_content(self, standalone_data: Dict) -> str:
-        """将独立展示区数据转为提示词文本。"""
+        """Convert standalone platform and RSS data to prompt text."""
         lines = []
         for platform in standalone_data.get("platforms", []):
             name = platform.get("name", platform.get("id", ""))
@@ -336,20 +353,21 @@ class AIAnalyzer:
 
     @staticmethod
     def _extract_json_object(response: str) -> str:
-        """提取完整 JSON 对象，兼容 Markdown code fence 和前后说明文字。"""
+        """Extract a complete JSON object, optionally wrapped in prose or a code fence."""
         text = response.strip()
         if text.startswith("```"):
-            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-            if text.endswith("```"):
-                text = text[:-3]
+            first_newline = text.find("\n")
+            text = text[first_newline + 1:] if first_newline >= 0 else text[3:]
+            if text.rstrip().endswith("```"):
+                text = text.rstrip()[:-3]
         start = text.find("{")
         end = text.rfind("}")
         if start < 0 or end < start:
-            raise ValueError("响应中没有完整 JSON 对象；可能被模型截断")
+            raise ValueError("响应中没有完整 JSON 对象，可能被模型截断")
         return text[start:end + 1]
 
     def _parse_response(self, response: str) -> AIAnalysisResult:
-        """严格解析 AI JSON；畸形或截断响应标记失败，不伪装成完整简报。"""
+        """Parse complete JSON; invalid/truncated responses are failures, not partial reports."""
         result = AIAnalysisResult(raw_response=response or "")
         if not response or not response.strip():
             result.error = "AI 返回空响应"
@@ -358,7 +376,7 @@ class AIAnalyzer:
         try:
             data = json.loads(self._extract_json_object(response))
             if not isinstance(data, dict):
-                raise ValueError("AI JSON 顶层必须是对象")
+                raise ValueError("JSON 顶层结构必须是对象")
 
             defaults = {
                 "core_trends": "暂无显著国内政策或热点主线。",
@@ -366,23 +384,26 @@ class AIAnalyzer:
                 "signals": "暂无足够证据判断弱信号。",
                 "rss_insights": "暂无显著 RSS 增量。",
                 "outlook_strategy": "暂无足够证据形成可靠情景推演。",
-                "stock_watchlist": "暂无足够证据形成股票候选。非投资建议；未评估实时行情、估值及财务数据。",
+                "stock_watchlist": (
+                    "暂无足够证据形成股票候选。非投资建议；未评估实时行情、估值及财务数据。"
+                ),
             }
             for field_name, default in defaults.items():
                 value = data.get(field_name, default)
                 if value is None or value == "":
                     value = default
                 if not isinstance(value, str):
-                    raise ValueError(f"AI 字段 {field_name} 必须是字符串")
+                    raise ValueError(f"字段 {field_name} 必须是字符串")
                 setattr(result, field_name, value.strip())
 
             summaries = data.get("standalone_summaries", {})
             if summaries is None:
                 summaries = {}
             if not isinstance(summaries, dict):
-                raise ValueError("AI 字段 standalone_summaries 必须是对象")
+                raise ValueError("字段 standalone_summaries 必须是对象")
             result.standalone_summaries = {
-                str(key): str(value) for key, value in summaries.items()
+                str(key): str(value)
+                for key, value in summaries.items()
                 if value is not None and str(value).strip()
             }
             result.success = True
@@ -390,7 +411,6 @@ class AIAnalyzer:
             result.success = False
             result.error = f"AI 响应不完整或格式无效: {exc}"
             print(f"[AI] {result.error}")
-
         return result
 
 # End of file
