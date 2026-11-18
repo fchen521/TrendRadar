@@ -299,7 +299,7 @@ def send_to_dingtalk(
         payload = {
             "msgtype": "markdown",
             "markdown": {
-                "title": f"TrendRadar 热点分析报告 - {report_type}",
+                "title": f"TrendRadar 国内财经简报 - {report_type}",
                 "text": batch_content,
             },
         }
@@ -680,7 +680,7 @@ def send_to_email(
 
         # 设置邮件主题
         now = get_time_func() if get_time_func else datetime.now()
-        subject = f"TrendRadar 热点分析报告 - {report_type} - {now.strftime('%m月%d日 %H:%M')}"
+        subject = f"TrendRadar 国内财经简报 - {report_type} - {now.strftime('%m月%d日 %H:%M')}"
         msg["Subject"] = Header(subject, "utf-8")
 
         # 设置其他标准 header
@@ -690,7 +690,7 @@ def send_to_email(
 
         # 添加纯文本部分（作为备选）
         text_content = f"""
-TrendRadar 热点分析报告
+TrendRadar 国内财经简报
 ========================
 报告类型：{report_type}
 生成时间：{now.strftime('%Y-%m-%d %H:%M:%S')}

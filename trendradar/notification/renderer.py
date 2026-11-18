@@ -181,7 +181,7 @@ def render_dingtalk_content(
     # 头部信息
     header_content = f"**总新闻数：** {total_titles}\n\n"
     header_content += f"**时间：** {now.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-    header_content += "**类型：** 热点分析报告\n\n"
+    header_content += "**类型：** 国内财经简报\n\n"
     header_content += "---\n\n"
 
     # 生成热点词汇统计部分

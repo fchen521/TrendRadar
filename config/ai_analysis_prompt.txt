@@ -160,13 +160,6 @@
 ## 热榜新闻
 {news_content}
 
-## RSS 订阅
-{rss_content}
-
-## 独立展示区
-以下为独立展示的完整热榜/RSS 数据（不受关键词过滤），请按板块说明中 standalone_summaries 的要求处理。
-{standalone_content}
-
 ---
 
 请基于上述数据撰写分析报告。以 JSON 格式返回，所有字段均为可选（缺少任何字段不会报错）：
